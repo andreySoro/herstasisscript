@@ -1,7 +1,7 @@
 import nodemailer from "nodemailer";
 import { execSync } from "child_process";
 import axios from "axios";
-import main from "./restartServer.js";
+// import main from "./restartServer.js";
 
 const transporter = () =>
   nodemailer.createTransport({
@@ -30,10 +30,10 @@ async function serverRestart() {
   return Promise.resolve("Server(s) was restarted");
 }
 
-async function sendEmail(login, timeStamp) {
-  if (login?.response?.status !== 200) {
+async function sendEmail(err, timeStamp) {
+  if (err?.response?.status !== 200) {
     const restart = await serverRestart();
-    const error = login?.response?.status || "unknown error";
+    const error = err?.response?.status || "unknown error";
     transporter().sendMail(
       {
         ...mailOptions(),
@@ -47,17 +47,40 @@ async function sendEmail(login, timeStamp) {
         }
       }
     );
+    return;
   }
 }
 
 export default async function loginAttempt() {
   const timeStamp = new Date().toLocaleString();
+
   const login = await axios
-    .post(process.env.MAILER_SCRIPT_LOGIN_URL, {
-      email: process.env.EMAIL,
-      password: process.env.HERSTASIS_LOGIN_PASSWORD,
-    })
-    .catch((err) => sendEmail(err, timeStamp));
-  //   main();
+    .post(
+      process.env.MAILER_SCRIPT_LOGIN_URL,
+      {
+        email: process.env.EMAIL,
+        password: process.env.HERSTASIS_LOGIN_PASSWORD,
+      },
+      { timeout: 15000 }
+    )
+    .catch(async (err) => {
+      sendEmail(err, timeStamp);
+    });
+
   console.log("LOGIN =", login?.status, "Time:", timeStamp);
+
+  if (login?.data?.AuthenticationResult?.AccessToken) {
+    const token = login?.data?.AuthenticationResult?.AccessToken;
+    const getUserResult = await axios
+      .get(process.env.MAILER_SCRIPT_GET_USERS_URL, {
+        headers: { Authorization: `Bearer ${token}` },
+      })
+      .catch(async (err) => {
+        sendEmail(err, timeStamp);
+      });
+
+    console.log("GET USER =", getUserResult?.status, "Time:", timeStamp);
+  }
+  //   main();
+  //login?.data?.AuthenticationResult = {AccessToken, ExpiresIn, IdToken, RefreshToken, TokenType}
 }
